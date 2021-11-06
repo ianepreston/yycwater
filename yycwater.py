@@ -11,15 +11,22 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+MEASUREMENT_GROUPS = [
+    "Calcium (Ca)(Dissolved)",
+    "Chloride (Cl)",
+    "Sodium (Na)(Dissolved)",
+    "Magnesium (Mg)(Dissolved)",
+    "Sulphate (SO4)",
+    "Total Alkalinity",
+    "pH",
+]
+
 
 def water_pull() -> List[Dict[str, str]]:
     """Get the results from the API."""
     # Hard code this when copied to the NAS
     api_key = os.getenv("APP_TOKEN")
-    # Might have to tweak this date range but it works while I'm testing
-    # We only want the latest sample but it's unclear how often they
-    # Survey this site, so getting the last 30 days seems safe
-    cutoff_dt = dt.datetime.now() - dt.timedelta(days=30)
+    cutoff_dt = dt.datetime.now() - dt.timedelta(days=365)
 
     base_url = "https://data.calgary.ca/resource/y8as-bmzj.json"
     columns = [
@@ -30,15 +37,7 @@ def water_pull() -> List[Dict[str, str]]:
         "result_units",
     ]
     selection = ", ".join(f"{col}" for col in columns)
-    measurement_groups = [
-        "Calcium (Ca)(Dissolved)",
-        "Chloride (Cl)",
-        "Sodium (Na)(Dissolved)",
-        "Potassium (K)(Dissolved)",
-        "Magnesium (Mg)(Dissolved)",
-        "Sulphate (SO4)",
-    ]
-    quoted_measures = [f"'{item}'" for item in measurement_groups]
+    quoted_measures = [f"'{item}'" for item in MEASUREMENT_GROUPS]
     items_in = f"parameter in({', '.join(item for item in quoted_measures)})"
     date_filter = f"sample_date > '{cutoff_dt:%Y-%m-%dT%H:%M:%S}'"
     where_clause = f"{items_in} AND {date_filter}"
@@ -59,20 +58,33 @@ def water_pull() -> List[Dict[str, str]]:
     return json.loads(raw_data.decode(encoding))
 
 
-def sample_date(pull: List[Dict[str, str]]) -> str:
-    """Get the latest sample date from a query.
+def parse_dates(pull: List[Dict[str, str]]):
+    """Turn datetime strings into datetimes for the pull."""
+    if isinstance(pull[0]["sample_date"], str):
+        for row in pull:
+            row["sample_date"] = dt.datetime.strptime(
+                row["sample_date"], "%Y-%m-%dT%H:%M:%S.%f"
+            )
+    return pull
 
-    Generally we expect to only pull one sample but it's possible
-    the 30 day period will cover more than one. We're using this
-    to generate a filename, and we want that based on the latest available
-    sample.
-    """
-    dates = [
-        dt.datetime.strptime(row["sample_date"], "%Y-%m-%dT%H:%M:%S.%f") for row in pull
-    ]
-    max_date = max(dates)
-    date_string = dt.datetime.strftime(max_date, "%Y-%m-%d")
-    return date_string
+
+def pivot_pull(pull: List[Dict[str, str]]):
+    """Pivot so columns are measures and rows are dates."""
+    parsed_pull = parse_dates(pull)
+    dates = sorted(list(set(row["sample_date"] for row in parsed_pull)))
+    pivot = list()
+    for date in dates:
+        row = {"sample_date": date}
+        observations = [row for row in parsed_pull if row["sample_date"] == date]
+        for measure in MEASUREMENT_GROUPS:
+            observation = [row for row in observations if row["parameter"] == measure]
+            if len(observation) != 1:
+                raise ValueError(
+                    "Should only have one value per date observation combo."
+                )
+            row[measure] = observation[0]["numeric_result"]
+        pivot.append(row)
+    return pivot
 
 
 def write_out(pull):
@@ -85,14 +97,15 @@ def write_out(pull):
     old samples are revised, and given we don't care about historical state, as long as
     we have the latest data available this is fine.
     """
-    file_name = f"water_data-{sample_date(pull)}.csv"
+    pivot = pivot_pull(pull)
+    file_name = f"water_data.csv"
     with open(file_name, "w", encoding="utf8", newline="") as output_file:
         writer = csv.DictWriter(
             output_file,
-            fieldnames=pull[0].keys(),
+            fieldnames=pivot[0].keys(),
         )
         writer.writeheader()
-        writer.writerows(pull)
+        writer.writerows(pivot)
 
 
 if __name__ == "__main__":
