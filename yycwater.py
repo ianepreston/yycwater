@@ -86,20 +86,6 @@ def pivot_pull(pull: List[Dict[str, str]]):
     return pivot
 
 
-def sample_date(pull: List[Dict[str, str]]) -> str:
-    """Get the latest sample date from a query.
-
-    Generally we expect to only pull one sample but it's possible
-    the 30 day period will cover more than one. We're using this
-    to generate a filename, and we want that based on the latest available
-    sample.
-    """
-    parsed_pull = parse_dates(pull)
-    max_date = max(row["sample_date"] for row in parsed_pull)
-    date_string = dt.datetime.strftime(max_date, "%Y-%m-%d")
-    return date_string
-
-
 def write_out(pull):
     """Save a result to csv.
 
