@@ -15,9 +15,10 @@ MEASUREMENT_GROUPS = [
     "Calcium (Ca)(Dissolved)",
     "Chloride (Cl)",
     "Sodium (Na)(Dissolved)",
-    "Potassium (K)(Dissolved)",
     "Magnesium (Mg)(Dissolved)",
     "Sulphate (SO4)",
+    "Total Alkalinity",
+    "pH",
 ]
 
 
